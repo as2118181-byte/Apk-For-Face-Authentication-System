@@ -16,13 +16,124 @@ class SecureDeviceApp extends StatelessWidget {
       title: 'Secure Device',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0A0A0A),
+      scaffoldBackgroundColor: const Color(0xFF0A0A0A),
       ),
-      home: const DashboardScreen(),
+      home: const SplashScreen(),
     );
   }
 }
 
+// ==================== SPLASH SCREEN ====================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnim;
+  late Animation<double> _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+
+    _scaleAnim = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
+    );
+
+    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+    );
+
+    _controller.forward();
+
+    // Navigate after animation
+    Future.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 700),
+            pageBuilder: (_, __, ___) => const DashboardScreen(),
+            transitionsBuilder: (_, animation, __, child) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+                    CurvedAnimation(parent: animation, curve: Curves.easeOut),
+                  ),
+                  child: child,
+                ),
+              );
+            },
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      body: Center(
+        child: FadeTransition(
+          opacity: _fadeAnim,
+          child: ScaleTransition(
+            scale: _scaleAnim,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/logo.png',
+                  height: 130,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(Icons.security,
+                        size: 120, color: Colors.redAccent);
+                  },
+                ),
+                const SizedBox(height: 28),
+                const Text(
+                  'SECURE DEVICE',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'FACE AUTHENTICATION',
+                  style: TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 2,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== DASHBOARD ====================
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -30,15 +141,25 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
   Timer? _timer;
   bool _pcOnline = false;
   Map<String, dynamic>? _status;
   String _lastError = '';
 
+  late AnimationController _entryController;
+  late Animation<double> _entryFade;
+
   @override
   void initState() {
     super.initState();
+    _entryController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _entryFade = CurvedAnimation(parent: _entryController, curve: Curves.easeOut);
+    _entryController.forward();
     _startPolling();
   }
 
@@ -82,6 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _entryController.dispose();
     super.dispose();
   }
 
@@ -104,174 +226,209 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.white70),
-            tooltip: 'About Us',
-            onPressed: () {
+          ScaleOnTap(
+            onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const AboutScreen()),
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 450),
+                  pageBuilder: (_, __, ___) => const AboutScreen(),
+                  transitionsBuilder: (_, animation, __, child) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0.08, 0),
+                          end: Offset.zero,
+                        ).animate(CurvedAnimation(
+                          parent: animation,
+                          curve: Curves.easeOutCubic,
+                        )),
+                        child: child,
+                      ),
+                    );
+                  },
+                ),
               );
             },
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.info_outline, color: Colors.white70),
+            ),
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          child: Column(
-            children: [
-              // Logo
-              Image.asset(
-                'assets/logo.png',
-                height: 75,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Icon(Icons.security, size: 70, color: Colors.redAccent);
-                },
-              ),
-              const SizedBox(height: 14),
-
-              const Text(
-                'SECURE DEVICE',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2.5,
-                  color: Colors.white,
+      body: FadeTransition(
+        opacity: _entryFade,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            child: Column(
+              children: [
+                // Logo
+                Image.asset(
+                  'assets/logo.png',
+                  height: 75,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(Icons.security, size: 70, color: Colors.redAccent);
+                  },
                 ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'FACE AUTHENTICATION',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white54,
-                  letterSpacing: 1.8,
-                ),
-              ),
-              const SizedBox(height: 22),
+                const SizedBox(height: 14),
 
-              // Online / Offline badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-                decoration: BoxDecoration(
-                  color: _pcOnline ? const Color(0xFF0D2A0D) : const Color(0xFF2A0D0D),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(
-                    color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
-                    width: 1.5,
+                const Text(
+                  'SECURE DEVICE',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2.5,
+                    color: Colors.white,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
-                      ),
+                const SizedBox(height: 6),
+                const Text(
+                  'FACE AUTHENTICATION',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white54,
+                    letterSpacing: 1.8,
+                  ),
+                ),
+                const SizedBox(height: 22),
+
+                // Online / Offline badge
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.easeInOut,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _pcOnline ? const Color(0xFF0D2A0D) : const Color(0xFF2A0D0D),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                      color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
+                      width: 1.5,
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      _pcOnline ? 'PC SYSTEM ONLINE' : 'PC SYSTEM OFFLINE',
-                      style: TextStyle(
-                        color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 10),
+                      Text(
+                        _pcOnline ? 'PC SYSTEM ONLINE' : 'PC SYSTEM OFFLINE',
+                        style: TextStyle(
+                          color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 36),
+                const SizedBox(height: 36),
 
-              Icon(
-                locked ? Icons.lock_rounded : Icons.lock_open_rounded,
-                size: 100,
-                color: locked ? Colors.redAccent : Colors.greenAccent,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                locked ? 'DEVICE LOCKED' : 'DEVICE UNLOCKED',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: locked ? Colors.redAccent : Colors.greenAccent,
-                  letterSpacing: 1.5,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 500),
+                  transitionBuilder: (child, anim) => ScaleTransition(
+                    scale: anim,
+                    child: FadeTransition(opacity: anim, child: child),
+                  ),
+                  child: Icon(
+                    locked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                    key: ValueKey(locked),
+                    size: 100,
+                    color: locked ? Colors.redAccent : Colors.greenAccent,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 15),
-              ),
+                const SizedBox(height: 16),
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 400),
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: locked ? Colors.redAccent : Colors.greenAccent,
+                    letterSpacing: 1.5,
+                  ),
+                  child: Text(locked ? 'DEVICE LOCKED' : 'DEVICE UNLOCKED'),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 15),
+                ),
 
-              const SizedBox(height: 32),
+                const SizedBox(height: 32),
 
-              _infoCard(icon: Icons.shield_outlined, label: 'Security Status', value: 'PROTECTED'),
-              _infoCard(
-                icon: Icons.camera_alt_outlined,
-                label: 'Authentication',
-                value: _pcOnline ? (auth ? 'AUTHENTICATED' : 'WAITING') : 'OFFLINE',
-                valueColor: _pcOnline
-                    ? (auth ? Colors.greenAccent : Colors.orangeAccent)
-                    : Colors.redAccent,
-              ),
-              if (user != '—' && user != 'null' && user.isNotEmpty)
+                _infoCard(icon: Icons.shield_outlined, label: 'Security Status', value: 'PROTECTED'),
                 _infoCard(
-                  icon: Icons.person_outline,
-                  label: 'User',
-                  value: user,
-                  valueColor: Colors.greenAccent,
+                  icon: Icons.camera_alt_outlined,
+                  label: 'Authentication',
+                  value: _pcOnline ? (auth ? 'AUTHENTICATED' : 'WAITING') : 'OFFLINE',
+                  valueColor: _pcOnline
+                      ? (auth ? Colors.greenAccent : Colors.orangeAccent)
+                      : Colors.redAccent,
                 ),
-              _infoCard(
-                icon: Icons.fingerprint,
-                label: 'Identity Confidence',
-                value: '${idConf.toStringAsFixed(1)}%',
-              ),
-              _infoCard(
-                icon: Icons.visibility_outlined,
-                label: 'Liveness Confidence',
-                value: '${liveConf.toStringAsFixed(1)}%',
-              ),
-              _infoCard(
-                icon: Icons.score_outlined,
-                label: 'Liveness Score',
-                value: liveScore.toStringAsFixed(4),
-              ),
-              _infoCard(
-                icon: Icons.compare_arrows,
-                label: 'Similarity Score',
-                value: simScore.toStringAsFixed(4),
-              ),
-              _infoCard(
-                icon: Icons.warning_amber_rounded,
-                label: 'Failed Attempts',
-                value: '$failed / $maxFailed',
-              ),
-              if (ts.isNotEmpty)
+                if (user != '—' && user != 'null' && user.isNotEmpty)
+                  _infoCard(
+                    icon: Icons.person_outline,
+                    label: 'User',
+                    value: user,
+                    valueColor: Colors.greenAccent,
+                  ),
                 _infoCard(
-                  icon: Icons.access_time,
-                  label: 'Last Updated',
-                  value: ts.length >= 19 ? ts.substring(11, 19) : ts,
+                  icon: Icons.fingerprint,
+                  label: 'Identity Confidence',
+                  value: '${idConf.toStringAsFixed(1)}%',
                 ),
+                _infoCard(
+                  icon: Icons.visibility_outlined,
+                  label: 'Liveness Confidence',
+                  value: '${liveConf.toStringAsFixed(1)}%',
+                ),
+                _infoCard(
+                  icon: Icons.score_outlined,
+                  label: 'Liveness Score',
+                  value: liveScore.toStringAsFixed(4),
+                ),
+                _infoCard(
+                  icon: Icons.compare_arrows,
+                  label: 'Similarity Score',
+                  value: simScore.toStringAsFixed(4),
+                ),
+                _infoCard(
+                  icon: Icons.warning_amber_rounded,
+                  label: 'Failed Attempts',
+                  value: '$failed / $maxFailed',
+                ),
+                if (ts.isNotEmpty)
+                  _infoCard(
+                    icon: Icons.access_time,
+                    label: 'Last Updated',
+                    value: ts.length >= 19 ? ts.substring(11, 19) : ts,
+                  ),
 
-              const SizedBox(height: 28),
-              const Text(
-                'AI FACE AUTHENTICATION',
-                style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 1.5),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Secure Device Demonstration',
-                style: TextStyle(color: Colors.white24, fontSize: 11),
-              ),
-              const SizedBox(height: 20),
-            ],
+                const SizedBox(height: 28),
+                const Text(
+                  'AI FACE AUTHENTICATION',
+                  style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 1.5),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Secure Device Demonstration',
+                  style: TextStyle(color: Colors.white24, fontSize: 11),
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
           ),
         ),
       ),
@@ -284,26 +441,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String value,
     Color valueColor = Colors.white,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161616),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.white54, size: 22),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 14)),
-          ),
-          Text(
-            value,
-            style: TextStyle(color: valueColor, fontWeight: FontWeight.w600, fontSize: 14),
-          ),
-        ],
+    return ScaleOnTap(
+      onTap: () {}, // just for touch feedback
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161616),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white54, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+            ),
+            Text(
+              value,
+              style: TextStyle(color: valueColor, fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -423,36 +583,92 @@ class AboutScreen extends StatelessWidget {
   }
 
   Widget _teamMember(String name, String roll) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161616),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
+    return ScaleOnTap(
+      onTap: () {},
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161616),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.redAccent,
+              child: Icon(Icons.person, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                ),
+                Text(
+                  roll,
+                  style: const TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 18,
-            backgroundColor: Colors.redAccent,
-            child: Icon(Icons.person, color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-              ),
-              Text(
-                roll,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-            ],
-          ),
-        ],
+    );
+  }
+}
+
+// ==================== TOUCH ANIMATION HELPER ====================
+class ScaleOnTap extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+
+  const ScaleOnTap({super.key, required this.child, required this.onTap});
+
+  @override
+  State<ScaleOnTap> createState() => _ScaleOnTapState();
+}
+
+class _ScaleOnTapState extends State<ScaleOnTap>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 100),
+      reverseDuration: const Duration(milliseconds: 150),
+      lowerBound: 0.94,
+      upperBound: 1.0,
+      value: 1.0,
+    );
+    _scale = _controller;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _controller.reverse(),
+      onTapUp: (_) {
+        _controller.forward();
+        widget.onTap();
+      },
+      onTapCancel: () => _controller.forward(),
+      child: ScaleTransition(
+        scale: _scale,
+        child: widget.child,
       ),
     );
   }
