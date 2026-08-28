@@ -16,7 +16,7 @@ class SecureDeviceApp extends StatelessWidget {
       title: 'Secure Device',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-      scaffoldBackgroundColor: const Color(0xFF0A0A0A),
+        scaffoldBackgroundColor: const Color(0xFF0A0A0A),
       ),
       home: const SplashScreen(),
     );
@@ -55,7 +55,6 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    // Navigate after animation
     Future.delayed(const Duration(milliseconds: 2200), () {
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -133,6 +132,145 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
+// ==================== FULL SCREEN IMAGE VIEWER ====================
+class FullScreenImageViewer extends StatelessWidget {
+  final String imageUrl;
+  final String title;
+  final String subtitle;
+  final String eventId;
+  final VoidCallback onDeleted;
+
+  const FullScreenImageViewer({
+    super.key,
+    required this.imageUrl,
+    required this.title,
+    required this.subtitle,
+    required this.eventId,
+    required this.onDeleted,
+  });
+
+  Future<void> _deleteThis(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Delete Photo', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to delete this photo?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final res = await http
+          .delete(Uri.parse('http://127.0.0.1:5000/api/security-events/$eventId'))
+          .timeout(const Duration(seconds: 5));
+
+      if (res.statusCode == 200) {
+        onDeleted();
+        if (context.mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Photo deleted'),
+              backgroundColor: Colors.redAccent,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            tooltip: 'Delete this photo',
+            onPressed: () => _deleteThis(context),
+          ),
+        ],
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.8,
+          maxScale: 4.0,
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.redAccent),
+              );
+            },
+            errorBuilder: (_, __, ___) => const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.broken_image, size: 64, color: Colors.white24),
+                SizedBox(height: 12),
+                Text(
+                  'Failed to load image',
+                  style: TextStyle(color: Colors.white38),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ==================== DASHBOARD ====================
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -151,6 +289,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   late AnimationController _entryController;
   late Animation<double> _entryFade;
 
+  List<Map<String, dynamic>> _events = [];
+  final Set<String> _seenEventIds = {};
+  static const String _base = 'http://127.0.0.1:5000';
+  bool _sseConnecting = false;
+
   @override
   void initState() {
     super.initState();
@@ -158,9 +301,12 @@ class _DashboardScreenState extends State<DashboardScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     );
-    _entryFade = CurvedAnimation(parent: _entryController, curve: Curves.easeOut);
+    _entryFade =
+        CurvedAnimation(parent: _entryController, curve: Curves.easeOut);
     _entryController.forward();
     _startPolling();
+    _loadHistoricalEvents();
+    _connectEventStream();
   }
 
   void _startPolling() {
@@ -171,7 +317,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   Future<void> _fetchStatus() async {
     try {
       final response = await http
-          .get(Uri.parse('http://127.0.0.1:5000/api/device-status'))
+          .get(Uri.parse('$_base/api/device-status'))
           .timeout(const Duration(milliseconds: 900));
 
       if (response.statusCode == 200) {
@@ -200,6 +346,225 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  Future<void> _loadHistoricalEvents() async {
+    try {
+      final r = await http
+          .get(Uri.parse('$_base/api/security-events?limit=20'))
+          .timeout(const Duration(seconds: 3));
+      if (r.statusCode == 200) {
+        final list = jsonDecode(r.body) as List;
+        if (mounted) {
+          setState(() {
+            _events.clear();
+            _seenEventIds.clear();
+            for (final e in list) {
+              final id = e['event_id'] as String?;
+              if (id != null && !_seenEventIds.contains(id)) {
+                _seenEventIds.add(id);
+                _events.add(Map<String, dynamic>.from(e));
+              }
+            }
+            _events.sort((a, b) =>
+                (b['timestamp'] ?? '').compareTo(a['timestamp'] ?? ''));
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _connectEventStream() {
+    if (_sseConnecting) return;
+    _sseConnecting = true;
+
+    Future<void> connect() async {
+      try {
+        final request =
+            http.Request('GET', Uri.parse('$_base/api/security-events/stream'));
+        final client = http.Client();
+        final response = await client.send(request).timeout(
+              const Duration(seconds: 10),
+            );
+
+        final stream = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter());
+
+        await for (final line in stream) {
+          if (!mounted) break;
+          if (line.startsWith('data: ')) {
+            final data = line.substring(6).trim();
+            if (data.isEmpty || data.contains('"type":"connected"')) continue;
+            try {
+              final evt = jsonDecode(data) as Map<String, dynamic>;
+              final id = evt['event_id'] as String?;
+              if (id != null && !_seenEventIds.contains(id)) {
+                _seenEventIds.add(id);
+                if (mounted) {
+                  setState(() {
+                    _events.insert(0, evt);
+                  });
+                }
+              }
+            } catch (_) {}
+          }
+        }
+        client.close();
+      } catch (_) {}
+
+      _sseConnecting = false;
+      if (mounted) {
+        await Future.delayed(const Duration(seconds: 4));
+        if (mounted) _connectEventStream();
+      }
+    }
+
+    connect();
+  }
+
+  void _openFullImage(Map<String, dynamic> e) {
+    final type = (e['type'] ?? '').toString().toUpperCase();
+    final ts = (e['timestamp'] ?? '').toString();
+    final id = e['event_id'] as String? ?? '';
+    final imageUrl = '$_base/api/security-events/$id/image';
+    final displayTime = ts.length >= 19
+        ? ts.substring(0, 19).replaceFirst('T', ' ')
+        : ts;
+
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (_, __, ___) => FullScreenImageViewer(
+          imageUrl: imageUrl,
+          title: type,
+          subtitle: displayTime,
+          eventId: id,
+          onDeleted: () {
+            setState(() {
+              _events.removeWhere((ev) => ev['event_id'] == id);
+              _seenEventIds.remove(id);
+            });
+          },
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+  }
+
+  Future<void> _deleteSingleEvent(String eventId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Delete Photo', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to delete this photo?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final res = await http
+          .delete(Uri.parse('$_base/api/security-events/$eventId'))
+          .timeout(const Duration(seconds: 5));
+
+      if (res.statusCode == 200 && mounted) {
+        setState(() {
+          _events.removeWhere((e) => e['event_id'] == eventId);
+          _seenEventIds.remove(eventId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Photo deleted'),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteAllEvents() async {
+    if (_events.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Delete All Photos', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Are you sure you want to delete all ${_events.length} photos?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete All', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final res = await http
+          .delete(Uri.parse('$_base/api/security-events'))
+          .timeout(const Duration(seconds: 8));
+
+      if (res.statusCode == 200 && mounted) {
+        setState(() {
+          _events.clear();
+          _seenEventIds.clear();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All photos deleted'),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete all'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -209,14 +574,20 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    final locked = (_status?['status']?.toString().toLowerCase() ?? 'locked') == 'locked';
+    final locked =
+        (_status?['status']?.toString().toLowerCase() ?? 'locked') == 'locked';
     final auth = _status?['authentication'] == true;
     final user = _status?['user']?.toString() ?? '—';
-    final idConf = (_status?['identity_confidence'] as num?)?.toDouble() ?? 0.0;
-    final liveConf = (_status?['liveness_confidence'] as num?)?.toDouble() ?? 0.0;
-    final liveScore = (_status?['liveness_score'] as num?)?.toDouble() ?? 0.0;
-    final simScore = (_status?['similarity_score'] as num?)?.toDouble() ?? 0.0;
-    final message = _status?['message']?.toString() ?? 'Waiting for authentication...';
+    final idConf =
+        (_status?['identity_confidence'] as num?)?.toDouble() ?? 0.0;
+    final liveConf =
+        (_status?['liveness_confidence'] as num?)?.toDouble() ?? 0.0;
+    final liveScore =
+        (_status?['liveness_score'] as num?)?.toDouble() ?? 0.0;
+    final simScore =
+        (_status?['similarity_score'] as num?)?.toDouble() ?? 0.0;
+    final message =
+        _status?['message']?.toString() ?? 'Waiting for authentication...';
     final failed = _status?['failed_attempts'] ?? 0;
     final maxFailed = _status?['max_failed_attempts'] ?? 4;
     final ts = _status?['timestamp']?.toString() ?? '';
@@ -265,16 +636,15 @@ class _DashboardScreenState extends State<DashboardScreen>
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
             child: Column(
               children: [
-                // Logo
                 Image.asset(
                   'assets/logo.png',
                   height: 75,
                   errorBuilder: (context, error, stackTrace) {
-                    return const Icon(Icons.security, size: 70, color: Colors.redAccent);
+                    return const Icon(Icons.security,
+                        size: 70, color: Colors.redAccent);
                   },
                 ),
                 const SizedBox(height: 14),
-
                 const Text(
                   'SECURE DEVICE',
                   style: TextStyle(
@@ -295,13 +665,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 22),
 
-                // Online / Offline badge
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 400),
                   curve: Curves.easeInOut,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
                   decoration: BoxDecoration(
-                    color: _pcOnline ? const Color(0xFF0D2A0D) : const Color(0xFF2A0D0D),
+                    color: _pcOnline
+                        ? const Color(0xFF0D2A0D)
+                        : const Color(0xFF2A0D0D),
                     borderRadius: BorderRadius.circular(30),
                     border: Border.all(
                       color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
@@ -317,14 +689,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                         height: 10,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
+                          color: _pcOnline
+                              ? Colors.greenAccent
+                              : Colors.redAccent,
                         ),
                       ),
                       const SizedBox(width: 10),
                       Text(
                         _pcOnline ? 'PC SYSTEM ONLINE' : 'PC SYSTEM OFFLINE',
                         style: TextStyle(
-                          color: _pcOnline ? Colors.greenAccent : Colors.redAccent,
+                          color: _pcOnline
+                              ? Colors.greenAccent
+                              : Colors.redAccent,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
@@ -368,11 +744,16 @@ class _DashboardScreenState extends State<DashboardScreen>
 
                 const SizedBox(height: 32),
 
-                _infoCard(icon: Icons.shield_outlined, label: 'Security Status', value: 'PROTECTED'),
+                _infoCard(
+                    icon: Icons.shield_outlined,
+                    label: 'Security Status',
+                    value: 'PROTECTED'),
                 _infoCard(
                   icon: Icons.camera_alt_outlined,
                   label: 'Authentication',
-                  value: _pcOnline ? (auth ? 'AUTHENTICATED' : 'WAITING') : 'OFFLINE',
+                  value: _pcOnline
+                      ? (auth ? 'AUTHENTICATED' : 'WAITING')
+                      : 'OFFLINE',
                   valueColor: _pcOnline
                       ? (auth ? Colors.greenAccent : Colors.orangeAccent)
                       : Colors.redAccent,
@@ -416,10 +797,53 @@ class _DashboardScreenState extends State<DashboardScreen>
                     value: ts.length >= 19 ? ts.substring(11, 19) : ts,
                   ),
 
+                // SECURITY EVENTS SECTION
+                const SizedBox(height: 28),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'SECURITY EVENTS',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (_events.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: _deleteAllEvents,
+                        icon: const Icon(Icons.delete_sweep,
+                            size: 18, color: Colors.redAccent),
+                        label: const Text(
+                          'Delete All',
+                          style: TextStyle(
+                              color: Colors.redAccent, fontSize: 13),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (_events.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      'No spoof / unknown events yet',
+                      style: TextStyle(color: Colors.white24, fontSize: 13),
+                    ),
+                  )
+                else
+                  ..._events.take(15).map((e) => _eventCard(e)),
+
                 const SizedBox(height: 28),
                 const Text(
                   'AI FACE AUTHENTICATION',
-                  style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 1.5),
+                  style: TextStyle(
+                      color: Colors.white38, fontSize: 11, letterSpacing: 1.5),
                 ),
                 const SizedBox(height: 4),
                 const Text(
@@ -442,7 +866,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     Color valueColor = Colors.white,
   }) {
     return ScaleOnTap(
-      onTap: () {}, // just for touch feedback
+      onTap: () {},
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -456,14 +880,109 @@ class _DashboardScreenState extends State<DashboardScreen>
             Icon(icon, color: Colors.white54, size: 22),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              child: Text(label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14)),
             ),
             Text(
               value,
-              style: TextStyle(color: valueColor, fontWeight: FontWeight.w600, fontSize: 14),
+              style: TextStyle(
+                  color: valueColor, fontWeight: FontWeight.w600, fontSize: 14),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _eventCard(Map<String, dynamic> e) {
+    final type = (e['type'] ?? '').toString().toUpperCase();
+    final isSpoof = type == 'SPOOF';
+    final ts = (e['timestamp'] ?? '').toString();
+    final score = e['score'];
+    final id = e['event_id'] as String? ?? '';
+    final imageUrl = '$_base/api/security-events/$id/image';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161616),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isSpoof
+              ? Colors.redAccent.withOpacity(0.45)
+              : Colors.orangeAccent.withOpacity(0.45),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => _openFullImage(e),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                imageUrl,
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 72,
+                  height: 72,
+                  color: Colors.black26,
+                  child:
+                      const Icon(Icons.broken_image, color: Colors.white24),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _openFullImage(e),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    type,
+                    style: TextStyle(
+                      color: isSpoof ? Colors.redAccent : Colors.orangeAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ts.length >= 19
+                        ? ts.substring(0, 19).replaceFirst('T', ' ')
+                        : ts,
+                    style:
+                        const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  if (score != null)
+                    Text(
+                      isSpoof
+                          ? 'Liveness score: ${(score as num).toStringAsFixed(4)}'
+                          : 'Similarity: ${(score as num).toStringAsFixed(4)}',
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 12),
+                    ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Tap to view full image',
+                    style: TextStyle(color: Colors.white24, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline,
+                color: Colors.redAccent, size: 22),
+            tooltip: 'Delete',
+            onPressed: () => _deleteSingleEvent(id),
+          ),
+        ],
       ),
     );
   }
@@ -493,7 +1012,8 @@ class AboutScreen extends StatelessWidget {
                 'assets/logo.png',
                 height: 90,
                 errorBuilder: (context, error, stackTrace) {
-                  return const Icon(Icons.security, size: 80, color: Colors.redAccent);
+                  return const Icon(Icons.security,
+                      size: 80, color: Colors.redAccent);
                 },
               ),
             ),
@@ -513,7 +1033,10 @@ class AboutScreen extends StatelessWidget {
 
             const Text(
               'About the Project',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.redAccent),
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.redAccent),
             ),
             const SizedBox(height: 12),
             const Text(
@@ -522,14 +1045,21 @@ class AboutScreen extends StatelessWidget {
               'and Liveness Detection (DeepPixBiS) to securely unlock a device only for authorized live users.\n\n'
               'The system can detect spoof attacks (photos/videos), unknown persons, and emotional states such as fear. '
               'It features real-time confidence scoring, failed attempt locking, email alerts, and a live Android dashboard '
-              'that shows the current security status of the PC system over a USB connection.',
+              'that shows the current security status of the PC system over a USB connection.\n\n'
+              'A real-time security monitoring layer has also been added. Whenever a spoof or unknown person is detected '
+              'and an image is saved by the backend, a security event is created and pushed instantly to the Android app. '
+              'The captured photo appears automatically on the dashboard and can be opened in full size by tapping the event. '
+              'Photos can also be deleted individually or all at once from the app.',
               style: TextStyle(fontSize: 15, height: 1.6, color: Colors.white70),
             ),
 
             const SizedBox(height: 28),
             const Text(
               'Key Features',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.redAccent),
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.redAccent),
             ),
             const SizedBox(height: 12),
             _feature('Real-time Face Detection & Recognition'),
@@ -539,11 +1069,18 @@ class AboutScreen extends StatelessWidget {
             _feature('Email Security Notifications'),
             _feature('Live Android Security Dashboard'),
             _feature('USB-only communication (ADB Reverse)'),
+            _feature('Real-time Spoof / Unknown Event Monitoring'),
+            _feature('Automatic Image Push to Android App'),
+            _feature('Full-size Photo Viewer for Security Events'),
+            _feature('Delete Individual or All Captured Photos'),
 
             const SizedBox(height: 36),
             const Text(
               'Performed by',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.redAccent),
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.redAccent),
             ),
             const SizedBox(height: 16),
 
@@ -557,7 +1094,8 @@ class AboutScreen extends StatelessWidget {
               child: Text(
                 'Final Year Project\nAI Secure Face Authentication System',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 13, height: 1.5),
+                style:
+                    TextStyle(color: Colors.white38, fontSize: 13, height: 1.5),
               ),
             ),
             const SizedBox(height: 20),
@@ -575,7 +1113,8 @@ class AboutScreen extends StatelessWidget {
           const Icon(Icons.check_circle, size: 18, color: Colors.greenAccent),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 15, color: Colors.white70)),
+            child: Text(text,
+                style: const TextStyle(fontSize: 15, color: Colors.white70)),
           ),
         ],
       ),
@@ -606,7 +1145,8 @@ class AboutScreen extends StatelessWidget {
               children: [
                 Text(
                   name,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  style:
+                      const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                 ),
                 Text(
                   roll,
