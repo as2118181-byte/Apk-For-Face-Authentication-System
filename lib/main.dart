@@ -282,6 +282,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   Timer? _timer;
+  Timer? _liveTimer;
   bool _pcOnline = false;
   Map<String, dynamic>? _status;
   String _lastError = '';
@@ -293,6 +294,10 @@ class _DashboardScreenState extends State<DashboardScreen>
   final Set<String> _seenEventIds = {};
   static const String _base = 'http://127.0.0.1:5000';
   bool _sseConnecting = false;
+
+  // Live camera
+  bool _liveCameraActive = false;
+  int _liveFrameId = 0;
 
   @override
   void initState() {
@@ -314,6 +319,23 @@ class _DashboardScreenState extends State<DashboardScreen>
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetchStatus());
   }
 
+  void _startLiveCameraRefresh() {
+    _liveTimer?.cancel();
+    // ~12-13 FPS – smooth and light on ADB
+    _liveTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+      if (mounted && _liveCameraActive) {
+        setState(() {
+          _liveFrameId++;
+        });
+      }
+    });
+  }
+
+  void _stopLiveCameraRefresh() {
+    _liveTimer?.cancel();
+    _liveTimer = null;
+  }
+
   Future<void> _fetchStatus() async {
     try {
       final response = await http
@@ -323,11 +345,21 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (mounted) {
+          final wasActive = _liveCameraActive;
+          final nowActive = data['live_camera_active'] == true;
+
           setState(() {
             _pcOnline = true;
             _status = data;
             _lastError = '';
+            _liveCameraActive = nowActive;
           });
+
+          if (nowActive && !wasActive) {
+            _startLiveCameraRefresh();
+          } else if (!nowActive && wasActive) {
+            _stopLiveCameraRefresh();
+          }
         }
       } else {
         _setOffline('HTTP ${response.statusCode}');
@@ -568,6 +600,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void dispose() {
     _timer?.cancel();
+    _liveTimer?.cancel();
     _entryController.dispose();
     super.dispose();
   }
@@ -582,10 +615,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         (_status?['identity_confidence'] as num?)?.toDouble() ?? 0.0;
     final liveConf =
         (_status?['liveness_confidence'] as num?)?.toDouble() ?? 0.0;
-    final liveScore =
-        (_status?['liveness_score'] as num?)?.toDouble() ?? 0.0;
-    final simScore =
-        (_status?['similarity_score'] as num?)?.toDouble() ?? 0.0;
     final message =
         _status?['message']?.toString() ?? 'Waiting for authentication...';
     final failed = _status?['failed_attempts'] ?? 0;
@@ -776,16 +805,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   value: '${liveConf.toStringAsFixed(1)}%',
                 ),
                 _infoCard(
-                  icon: Icons.score_outlined,
-                  label: 'Liveness Score',
-                  value: liveScore.toStringAsFixed(4),
-                ),
-                _infoCard(
-                  icon: Icons.compare_arrows,
-                  label: 'Similarity Score',
-                  value: simScore.toStringAsFixed(4),
-                ),
-                _infoCard(
                   icon: Icons.warning_amber_rounded,
                   label: 'Failed Attempts',
                   value: '$failed / $maxFailed',
@@ -796,6 +815,56 @@ class _DashboardScreenState extends State<DashboardScreen>
                     label: 'Last Updated',
                     value: ts.length >= 19 ? ts.substring(11, 19) : ts,
                   ),
+
+                // ========== LIVE CAMERA SECTION ==========
+                if (_liveCameraActive) ...[
+                  const SizedBox(height: 28),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'LIVE CAMERA',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161616),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: AspectRatio(
+                        aspectRatio: 4 / 3,
+                        child: Image.network(
+                          '$_base/api/live-frame?t=$_liveFrameId',
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                          filterQuality: FilterQuality.low,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            // Keep previous frame visible while loading next → no flicker
+                            if (loadingProgress == null) return child;
+                            return child;
+                          },
+                          errorBuilder: (_, __, ___) => Container(
+                            color: Colors.black26,
+                            child: const Center(
+                              child: Icon(Icons.videocam_off,
+                                  color: Colors.white24, size: 48),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
 
                 // SECURITY EVENTS SECTION
                 const SizedBox(height: 28),
@@ -898,7 +967,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     final type = (e['type'] ?? '').toString().toUpperCase();
     final isSpoof = type == 'SPOOF';
     final ts = (e['timestamp'] ?? '').toString();
-    final score = e['score'];
     final id = e['event_id'] as String? ?? '';
     final imageUrl = '$_base/api/security-events/$id/image';
 
@@ -959,14 +1027,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     style:
                         const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
-                  if (score != null)
-                    Text(
-                      isSpoof
-                          ? 'Liveness score: ${(score as num).toStringAsFixed(4)}'
-                          : 'Similarity: ${(score as num).toStringAsFixed(4)}',
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 12),
-                    ),
                   const SizedBox(height: 4),
                   const Text(
                     'Tap to view full image',
