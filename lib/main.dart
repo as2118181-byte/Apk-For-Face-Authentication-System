@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'screens/security_assistant_screen.dart';
 
 void main() {
   runApp(const SecureDeviceApp());
@@ -626,6 +627,23 @@ class _DashboardScreenState extends State<DashboardScreen>
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // ========== AI SECURITY ASSISTANT BUTTON ==========
+          ScaleOnTap(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SecurityAssistantScreen(),
+                ),
+              );
+            },
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.smart_toy_outlined, color: Colors.redAccent),
+            ),
+          ),
+
+          // ========== EXISTING ABOUT BUTTON ==========
           ScaleOnTap(
             onTap: () {
               Navigator.push(
@@ -849,7 +867,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                           gaplessPlayback: true,
                           filterQuality: FilterQuality.low,
                           loadingBuilder: (context, child, loadingProgress) {
-                            // Keep previous frame visible while loading next → no flicker
                             if (loadingProgress == null) return child;
                             return child;
                           },
@@ -1133,6 +1150,7 @@ class AboutScreen extends StatelessWidget {
             _feature('Automatic Image Push to Android App'),
             _feature('Full-size Photo Viewer for Security Events'),
             _feature('Delete Individual or All Captured Photos'),
+            _feature('Local AI Security Assistant (Chatbot)'),
 
             const SizedBox(height: 36),
             const Text(
